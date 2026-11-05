@@ -1,0 +1,9 @@
+{
+    "100": true,
+    "all": true,
+    "checkCoverage": true,
+    "include": ["src/data/**/*.ts", "src/server/**/*.ts"],
+    "exclude": ["**/*.test.ts", "**/index.ts"],
+    "perFile": true,
+    "reporter": ["text"]
+}

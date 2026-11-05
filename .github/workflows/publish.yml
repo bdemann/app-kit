@@ -1,0 +1,28 @@
+# Publishes to npm when a GitHub release is published, using npm trusted publishing (OIDC): no
+# token is stored anywhere. One-time setup, after the first manual publish: on npmjs.com, open
+# @bdemann/app-kit -> Settings -> Trusted publishing, and add GitHub Actions with repository
+# bdemann/app-kit and workflow file publish.yml.
+name: publish
+
+on:
+    release:
+        types: [published]
+
+permissions:
+    contents: read
+    id-token: write
+
+jobs:
+    publish:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4.1.7
+            - uses: actions/setup-node@v4.0.3
+              with:
+                  node-version-file: '.nvmrc'
+                  registry-url: 'https://registry.npmjs.org'
+            - run: npm install -g npm@11
+            - run: npm ci
+            - name: check the tag matches package.json
+              run: test "v$(node -p "require('./package.json').version")" = "${{ github.event.release.tag_name }}"
+            - run: npm publish --provenance --access public

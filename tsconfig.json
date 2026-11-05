@@ -1,0 +1,26 @@
+{
+    "compilerOptions": {
+        "alwaysStrict": true,
+        "declaration": true,
+        "declarationMap": true,
+        "sourceMap": true,
+        "exactOptionalPropertyTypes": true,
+        "forceConsistentCasingInFileNames": true,
+        "isolatedModules": true,
+        "lib": ["es2024", "dom", "dom.iterable"],
+        "module": "node20",
+        "moduleResolution": "node16",
+        "noImplicitOverride": true,
+        "noImplicitReturns": true,
+        "noUncheckedIndexedAccess": true,
+        "outDir": "./dist/",
+        "rootDir": "./src/",
+        "skipLibCheck": true,
+        "strict": true,
+        "target": "es2024",
+        "types": ["node"],
+        "useDefineForClassFields": true
+    },
+    "include": ["src/**/*.ts"],
+    "exclude": ["src/**/*.test.ts"]
+}

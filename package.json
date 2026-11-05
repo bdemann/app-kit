@@ -1,0 +1,74 @@
+{
+    "name": "@bdemann/app-kit",
+    "version": "0.1.0",
+    "description": "Shared bottom nav, slide-out drawer, About page and Feedback page for Benjamin's element-vir apps, plus a platform-neutral feedback server handler.",
+    "keywords": [
+        "element-vir",
+        "pwa",
+        "feedback",
+        "about"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/bdemann/app-kit.git"
+    },
+    "license": "(MIT OR CC0-1.0)",
+    "author": "Benjamin DeMann",
+    "sideEffects": false,
+    "type": "module",
+    "exports": {
+        "./ui": {
+            "types": "./dist/ui/index.d.ts",
+            "default": "./dist/ui/index.js"
+        },
+        "./data": {
+            "types": "./dist/data/index.d.ts",
+            "default": "./dist/data/index.js"
+        },
+        "./server": {
+            "types": "./dist/server/index.d.ts",
+            "default": "./dist/server/index.js"
+        }
+    },
+    "files": [
+        "dist",
+        "src",
+        "!src/**/*.test.ts",
+        "!dist/**/*.test.*"
+    ],
+    "scripts": {
+        "build": "rm -rf dist && tsc -p tsconfig.json",
+        "compile": "tsc -p tsconfig.test.json",
+        "format": "prettier --write .",
+        "prepublishOnly": "npm run test:all && npm run build",
+        "test": "node --import tsx --test 'src/**/*.test.ts'",
+        "test:all": "npm run compile && npm run test:coverage && npm run test:no-eval && npm run test:format",
+        "test:coverage": "c8 npm test",
+        "test:format": "prettier --check .",
+        "test:no-eval": "NODE_OPTIONS=--disallow-code-generation-from-strings npm test"
+    },
+    "devDependencies": {
+        "@augment-vir/assert": "32.5.0",
+        "@augment-vir/test": "32.5.0",
+        "@types/node": "26.6.5",
+        "c8": "12.0.0",
+        "element-vir": "27.0.2",
+        "prettier": "3.3.3",
+        "tsx": "4.23.15",
+        "typescript": "6.0.3"
+    },
+    "peerDependencies": {
+        "element-vir": "^27.0.0"
+    },
+    "peerDependenciesMeta": {
+        "element-vir": {
+            "optional": true
+        }
+    },
+    "engines": {
+        "node": ">=22"
+    },
+    "publishConfig": {
+        "access": "public"
+    }
+}
