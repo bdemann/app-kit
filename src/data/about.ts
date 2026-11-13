@@ -116,3 +116,54 @@ export function updateStatusFromRegistration({
         return 'not-registered';
     }
 }
+
+/**
+ * The "App updates" text, made consistent with the latest-commit check: when that check says a
+ * newer version is live, a registration that reports "up to date" (for example under an
+ * auto-updating service worker, which has no waiting worker) must not contradict it.
+ */
+export function describeCombinedUpdateStatus({
+    updateStatus,
+    latest,
+}: Readonly<{updateStatus: UpdateStatus; latest: LatestStatus | 'loading'}>): string {
+    return describeUpdateStatus(
+        latest === 'newer-available' && updateStatus === 'up-to-date'
+            ? 'update-ready'
+            : updateStatus,
+    );
+}
+
+/** A service worker's `state`. */
+export type WorkerState =
+    | 'parsed'
+    | 'installing'
+    | 'installed'
+    | 'activating'
+    | 'activated'
+    | 'redundant';
+
+/** What Reload does next about a new service worker. */
+export type ReloadStep = 'wait' | 'skip-waiting' | 'reload';
+
+/**
+ * Maps a new worker's state to the next Reload step. `installed` means it is waiting, so ask it to
+ * take over; `activated` (or `redundant`, which will never activate, or no worker at all) means
+ * reloading is safe; anything else means keep waiting.
+ */
+export function reloadStepForWorkerState(state: WorkerState | undefined): ReloadStep {
+    if (state === 'installed') {
+        return 'skip-waiting';
+    } else if (state === undefined || state === 'activated' || state === 'redundant') {
+        return 'reload';
+    } else {
+        return 'wait';
+    }
+}
+
+/** Which new worker Reload should wait for: a waiting one first, else an installing one. */
+export function pickNewWorker<T>({
+    waiting,
+    installing,
+}: Readonly<{waiting: T | null | undefined; installing: T | null | undefined}>): T | undefined {
+    return waiting ?? installing ?? undefined;
+}
