@@ -25,4 +25,9 @@ jobs:
             - run: npm ci
             - name: check the tag matches package.json
               run: test "v$(node -p "require('./package.json').version")" = "${{ github.event.release.tag_name }}"
+            # .npmrc has ignore-scripts=true, so `prepublishOnly` never runs: test and build here.
+            - run: npm run test:all
+            - run: npm run build
+            - name: check the build is in the package
+              run: test -f dist/ui/index.js && test -f dist/data/index.js && test -f dist/server/index.js
             - run: npm publish --provenance --access public
