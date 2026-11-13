@@ -177,6 +177,12 @@ The token is only ever sent in a header. Failures are logged by status and error
 
 ## Changelog
 
+### 0.2.1
+
+The same code as 0.2.0, published with its built files. 0.2.0 on npm has no `dist` folder (the
+publish workflow skipped the build because `.npmrc` sets `ignore-scripts=true`), so it cannot be
+imported: use 0.2.1.
+
 ### 0.2.0
 
 -   Feedback, all optional and backward compatible: contact fields (`name`, `email`, "Reply to" line),
