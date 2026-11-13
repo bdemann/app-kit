@@ -64,11 +64,13 @@ html`
     -   `contactFields: boolean`: shows "Name (optional)" and "Email (optional, if you'd like a
         reply)"; the draft gets trimmed `name` and `email`. An invalid email shows an inline error and
         does not send. `contactStorageKey: string` remembers both in localStorage.
-    -   `diagnostics: {label?, defaultKinds?, collect}`: a checkbox (default label "Attach diagnostic
+    -   `diagnostics: {label?, note?, defaultKinds?, collect}`: a checkbox (default label "Attach diagnostic
         logs"), checked by default for `defaultKinds` (default `['problem']`) until the person touches
         it, with a collapsed "What will be sent" preview of what `collect(): {info, log}` returned.
         When checked, the draft gets `diagnosticsInfo` and `diagnosticsLog` (the log is trimmed to the
-        newest lines that fit `feedbackLimits.diagnosticsLog`).
+        newest lines that fit `feedbackLimits.diagnosticsLog`). `note` is one muted sentence under the
+        checkbox row (aligned with the label text, linked by `aria-describedby`), so the label can stay
+        short; without it nothing changes.
     -   `prefill: {kind?, message?, attachDiagnostics?}`: starting values, applied once when the
         element is created. A prefill message wins over a stored draft.
     -   `honeypot: boolean`: a visually hidden, `aria-hidden`, untabbable "Website" field whose value
@@ -86,6 +88,7 @@ any of them on `:root` or on a parent element:
 | `--kit-text`       | `#2b2118`             | Body text                         |
 | `--kit-muted-text` | `#5c4631`             | Hints, inactive tabs              |
 | `--kit-surface`    | `#ffffff`             | Page, nav, and drawer backgrounds |
+| `--kit-field`      | `--kit-surface`       | Feedback text fields and preview  |
 | `--kit-border`     | `#b9a27f`             | The nav's top border              |
 | `--kit-focus`      | `#1a5fd0`             | Focus outlines                    |
 | `--kit-error`      | `#a4262c`             | Error messages                    |
@@ -176,6 +179,14 @@ The status codes:
 The token is only ever sent in a header. Failures are logged by status and error name only.
 
 ## Changelog
+
+### 0.2.2
+
+-   `FeedbackPage` `diagnostics.note`: an optional muted sentence under the checkbox, linked with
+    `aria-describedby`.
+-   The feedback textarea, name, email and "What will be sent" box now share one explicit background
+    and text color (they followed the browser default on dark themes), and placeholders use the muted
+    color. New optional `--kit-field` property (falls back to `--kit-surface`) sets that background.
 
 ### 0.2.1
 

@@ -31,6 +31,11 @@ export type FeedbackDraft = {
 export type FeedbackDiagnosticsInput = {
     /** Default "Attach diagnostic logs". */
     label?: string | undefined;
+    /**
+     * One muted sentence shown under the checkbox row (not inside the label) and tied to the checkbox
+     * with `aria-describedby`. Keeps the label short on a narrow phone. Nothing is shown without it.
+     */
+    note?: string | undefined;
     /** Kinds that start with the box checked. Default only `problem`. */
     defaultKinds?: ReadonlyArray<FeedbackKind> | undefined;
     /** Called on each render, so the "What will be sent" preview is exactly what is attached. */
@@ -220,6 +225,27 @@ export const FeedbackPage = defineElement<{
             color: var(--kit-muted-text, #5c4631);
         }
 
+        /** Every text control shares one explicit background so none falls back to the browser's. */
+        textarea,
+        input[type='text'],
+        input[type='email'],
+        pre {
+            background: var(--kit-field, var(--kit-surface, #ffffff));
+            color: var(--kit-text, #2b2118);
+        }
+
+        textarea,
+        input[type='text'],
+        input[type='email'] {
+            font: inherit;
+        }
+
+        textarea::placeholder,
+        input::placeholder {
+            color: var(--kit-muted-text, #5c4631);
+            opacity: 1;
+        }
+
         textarea {
             box-sizing: border-box;
             width: 100%;
@@ -227,8 +253,6 @@ export const FeedbackPage = defineElement<{
             padding: 10px;
             border: 2px solid var(--kit-accent, #6b4423);
             border-radius: 8px;
-            font: inherit;
-            color: inherit;
             resize: vertical;
         }
 
@@ -262,9 +286,6 @@ export const FeedbackPage = defineElement<{
             padding: 0 10px;
             border: 2px solid var(--kit-accent, #6b4423);
             border-radius: 8px;
-            font: inherit;
-            color: inherit;
-            background: var(--kit-surface, #ffffff);
         }
 
         .hint {
@@ -286,6 +307,13 @@ export const FeedbackPage = defineElement<{
             height: 22px;
             margin: 0;
             accent-color: var(--kit-accent, #6b4423);
+        }
+
+        .attach-note {
+            /** Lines up with the label text: checkbox width (22px) plus the row gap (10px). */
+            margin: 0 0 4px 32px;
+            font-size: 14px;
+            color: var(--kit-muted-text, #5c4631);
         }
 
         details {
@@ -312,7 +340,6 @@ export const FeedbackPage = defineElement<{
             white-space: pre-wrap;
             overflow-wrap: anywhere;
             color: var(--kit-muted-text, #5c4631);
-            background: var(--kit-surface, #ffffff);
         }
 
         /** Honeypot: off the page and out of the accessibility tree, but still in the DOM. */
@@ -562,6 +589,7 @@ export const FeedbackPage = defineElement<{
                           <input
                               type="checkbox"
                               .checked=${attach}
+                              aria-describedby=${inputs.diagnostics.note ? 'attach-note' : nothing}
                               ${listen('change', (event) => {
                                   updateState({
                                       attachChoice: (event.target as HTMLInputElement).checked,
@@ -570,6 +598,13 @@ export const FeedbackPage = defineElement<{
                           />
                           ${inputs.diagnostics.label ?? 'Attach diagnostic logs'}
                       </label>
+                      ${inputs.diagnostics.note
+                          ? html`
+                                <p class="attach-note" id="attach-note">
+                                    ${inputs.diagnostics.note}
+                                </p>
+                            `
+                          : nothing}
                       ${report
                           ? html`
                                 <details>
