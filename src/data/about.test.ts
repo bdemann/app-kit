@@ -2,7 +2,10 @@ import {describe, itCases} from '@augment-vir/test';
 import {
     commitUrl,
     compareCommits,
+    describeCombinedUpdateStatus,
     describeLatestStatus,
+    pickNewWorker,
+    reloadStepForWorkerState,
     describeUpdateStatus,
     formatIsoTimestamp,
     shortCommitSha,
@@ -255,6 +258,65 @@ describe(updateStatusFromRegistration.name, () => {
                 hasWaitingWorker: true,
             },
             expect: 'update-ready',
+        },
+    ]);
+});
+
+describe(describeCombinedUpdateStatus.name, () => {
+    itCases(describeCombinedUpdateStatus, [
+        {
+            it: 'says ready when a newer version is live but the worker reports up to date',
+            input: {updateStatus: 'up-to-date', latest: 'newer-available'},
+            expect: 'A new version is ready. Reload to use it.',
+        },
+        {
+            it: 'keeps up to date when nothing newer is live',
+            input: {updateStatus: 'up-to-date', latest: 'up-to-date'},
+            expect: 'Up to date.',
+        },
+        {
+            it: 'keeps up to date while the latest check is loading',
+            input: {updateStatus: 'up-to-date', latest: 'loading'},
+            expect: 'Up to date.',
+        },
+        {
+            it: 'keeps checking',
+            input: {updateStatus: 'checking', latest: 'newer-available'},
+            expect: 'Checking for updates...',
+        },
+        {
+            it: 'keeps not registered',
+            input: {updateStatus: 'not-registered', latest: 'newer-available'},
+            expect: 'Not installed yet (the service worker is not active).',
+        },
+        {
+            it: 'keeps ready',
+            input: {updateStatus: 'update-ready', latest: 'unknown'},
+            expect: 'A new version is ready. Reload to use it.',
+        },
+    ]);
+});
+
+describe(reloadStepForWorkerState.name, () => {
+    itCases(reloadStepForWorkerState, [
+        {it: 'waits while installing', input: 'installing', expect: 'wait'},
+        {it: 'waits while parsed', input: 'parsed', expect: 'wait'},
+        {it: 'waits while activating', input: 'activating', expect: 'wait'},
+        {it: 'asks a waiting worker to take over', input: 'installed', expect: 'skip-waiting'},
+        {it: 'reloads once activated', input: 'activated', expect: 'reload'},
+        {it: 'reloads when redundant', input: 'redundant', expect: 'reload'},
+        {it: 'reloads with no worker', input: undefined, expect: 'reload'},
+    ]);
+});
+
+describe(pickNewWorker.name, () => {
+    itCases(pickNewWorker, [
+        {it: 'prefers waiting', input: {waiting: 'w', installing: 'i'}, expect: 'w'},
+        {it: 'falls back to installing', input: {waiting: null, installing: 'i'}, expect: 'i'},
+        {
+            it: 'is undefined with neither',
+            input: {waiting: null, installing: undefined},
+            expect: undefined,
         },
     ]);
 });

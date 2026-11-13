@@ -2,6 +2,9 @@ import {
     buildFeedbackIssue,
     buildGitHubIssueRequest,
     feedbackFailedMessage,
+    feedbackLimits,
+    isHoneypotTripped,
+    type FeedbackLabels,
     feedbackNotConfiguredMessage,
     parseFeedbackRequest,
 } from '../data/feedback.js';
@@ -25,8 +28,18 @@ export type SendFeedbackOptions = Readonly<{
     /** `owner/name`. */
     repo: string;
     appName: string;
-    /** Who sent it, by first name, from your session. Never an email address. */
-    sender: string;
+    /**
+     * Who sent it, by first name, from your session. Never an email address. Leave out for a public
+     * app without sign-in: the issue then shows the name the person typed, if any.
+     */
+    sender?: string | undefined;
+    /** Issue labels. Default: `['feedback', <kind>]`. */
+    labels?: Readonly<FeedbackLabels> | undefined;
+    /**
+     * Largest raw request body, in characters, that {@link handleFeedbackRequest} reads. Default
+     * `feedbackLimits.request`. Ignored by `sendFeedback`, which receives an already parsed body.
+     */
+    maxBodyChars?: number | undefined;
     /** The server's own build; the browser's claimed commit is ignored. */
     commit: string;
     /** ISO timestamp for the issue body. */
@@ -54,7 +67,9 @@ function failure(status: 400 | 502 | 503, error: string): SendFeedbackResult {
 /**
  * Validates a feedback submission and files it as a GitHub issue. Platform neutral: it runs in a
  * Cloudflare Worker, a Netlify Function, or Node, and never uses `new Function`. Authentication
- * is the caller's job: only call this for a signed-in person.
+ * is the caller's job: only call this for a signed-in person, or for a public app, set up the
+ * contact and honeypot fields. A submission whose honeypot is filled answers 200 without calling
+ * GitHub. Message text, names, emails and diagnostics are never logged.
  */
 export async function sendFeedback({
     body,
@@ -62,6 +77,7 @@ export async function sendFeedback({
     repo,
     appName,
     sender,
+    labels,
     commit,
     submittedAt,
     fetchFunction,
@@ -77,6 +93,14 @@ export async function sendFeedback({
     if (!parsed.ok) {
         return failure(400, parsed.error);
     }
+    if (isHoneypotTripped(parsed.request)) {
+        return {
+            status: 200,
+            body: {
+                ok: true,
+            },
+        };
+    }
     const issue = buildFeedbackIssue({
         request: {
             ...parsed.request,
@@ -85,6 +109,7 @@ export async function sendFeedback({
         sender,
         submittedAt,
         appName,
+        labels,
     });
     const github = buildGitHubIssueRequest({
         token,
@@ -118,8 +143,8 @@ export async function sendFeedback({
 
 /**
  * Wraps {@link sendFeedback} for platforms with Fetch API `Request` / `Response` (Cloudflare
- * Workers, Netlify Functions v2, Deno, Bun). Answers 405 for anything but POST and 400 for a body
- * that is not JSON.
+ * Workers, Netlify Functions v2, Deno, Bun). Answers 405 for anything but POST, 415 for a
+ * content type that is not JSON, and 400 for a body that is too large (`maxBodyChars`) or not JSON.
  */
 export async function handleFeedbackRequest(
     request: Request,
@@ -139,9 +164,38 @@ export async function handleFeedbackRequest(
             },
         );
     }
+    if (!(request.headers.get('content-type') ?? '').toLowerCase().includes('application/json')) {
+        return Response.json(
+            {
+                ok: false,
+                error: 'Send JSON.',
+            },
+            {
+                status: 415,
+            },
+        );
+    }
+    const maxBodyChars = options.maxBodyChars ?? feedbackLimits.request;
+    const declaredLength = Number(request.headers.get('content-length'));
+    const tooLarge = Response.json(
+        {
+            ok: false,
+            error: 'That message is too long.',
+        },
+        {
+            status: 400,
+        },
+    );
+    if (declaredLength > maxBodyChars) {
+        return tooLarge;
+    }
+    const text = await request.text();
+    if (text.length > maxBodyChars) {
+        return tooLarge;
+    }
     let body: unknown;
     try {
-        body = await request.json();
+        body = JSON.parse(text);
     } catch {
         body = undefined;
     }

@@ -15,9 +15,20 @@ export const feedbackLimits = {
     sender: 60,
     page: 200,
     appInfo: 60,
+    name: 60,
+    email: 254,
+    /** App, device and settings lines above the diagnostic log. */
+    diagnosticsInfo: 4000,
+    /** Diagnostic log text; the page trims the oldest lines first. GitHub allows 65,536 per issue. */
+    diagnosticsLog: 50_000,
+    /** Largest raw request body, in characters. */
+    request: 70_000,
 } as const;
 
-/** What the page sends: no contact details, because only signed-in people can send feedback. */
+/**
+ * What the page sends. Apps with signed-in people send only `kind` and `message` (plus app info);
+ * public apps can also collect the optional contact, honeypot and diagnostics fields.
+ */
 export type FeedbackRequest = {
     kind: FeedbackKind;
     message: string;
@@ -25,6 +36,16 @@ export type FeedbackRequest = {
     page?: string | undefined;
     version?: string | undefined;
     commit?: string | undefined;
+    /** Optional name, up to {@link feedbackLimits}.name characters. */
+    name?: string | undefined;
+    /** Optional reply address; when non-empty it must pass {@link looksLikeEmail}. */
+    email?: string | undefined;
+    /** Honeypot: hidden from people, so only bots fill it. See {@link isHoneypotTripped}. */
+    website?: string | undefined;
+    /** Optional diagnostics attachment: app, device and settings lines. */
+    diagnosticsInfo?: string | undefined;
+    /** Optional diagnostics attachment: one log line per row, oldest first. */
+    diagnosticsLog?: string | undefined;
 };
 
 export type FeedbackIssue = {
@@ -86,6 +107,89 @@ export function sanitizeFeedbackText(text: string): string {
     return neutralizeMentions(stripHtml(text)).trim();
 }
 
+/** Whether the honeypot field was filled in, which only a bot does. */
+export function isHoneypotTripped(request: Readonly<Pick<FeedbackRequest, 'website'>>): boolean {
+    return !!request.website;
+}
+
+/** Loose shape check only: something@something.tld, no spaces, at most 254 characters. */
+export function looksLikeEmail(email: string): boolean {
+    const parts = email.split('@');
+    const [local, domain] = parts;
+    return (
+        email.length <= feedbackLimits.email &&
+        parts.length === 2 &&
+        !!local &&
+        !!domain &&
+        !/[\s<>]/.test(email) &&
+        domain.includes('.') &&
+        !domain.startsWith('.') &&
+        !domain.endsWith('.')
+    );
+}
+
+/** Keeps the newest lines: drops whole lines from the start until the text fits in `max`. */
+export function trimOldestLines({text, max}: Readonly<{text: string; max: number}>): string {
+    if (text.length <= max) {
+        return text;
+    }
+    const tail = text.slice(text.length - max);
+    const firstBreak = tail.indexOf('\n');
+    /** A single line longer than max: keep its end. */
+    return firstBreak < 0 ? tail : tail.slice(firstBreak + 1);
+}
+
+/**
+ * Makes diagnostics safe inside a markdown code fence: HTML and control characters go, and
+ * backticks become apostrophes so nothing can close the fence. Mentions cannot notify from a code
+ * block, so they are left alone.
+ */
+export function sanitizeDiagnosticText(text: string): string {
+    return stripHtml(text).replaceAll('`', "'").trim();
+}
+
+/**
+ * Whether the "Attach diagnostic logs" box is checked: on for the `defaultKinds` (default only a
+ * Problem) until the person touches it (`userChoice`), after which their choice wins.
+ */
+export function isDiagnosticsAttached({
+    kind,
+    userChoice,
+    defaultKinds = ['problem'],
+}: Readonly<{
+    kind: FeedbackKind;
+    userChoice: boolean | undefined;
+    defaultKinds?: ReadonlyArray<FeedbackKind> | undefined;
+}>): boolean {
+    return userChoice ?? defaultKinds.includes(kind);
+}
+
+/** The collapsed diagnostics section of the issue body, or '' when nothing was attached. */
+export function buildDiagnosticsSection(
+    request: Readonly<Pick<FeedbackRequest, 'diagnosticsInfo' | 'diagnosticsLog'>>,
+): string {
+    const info = clip({
+        text: sanitizeDiagnosticText(request.diagnosticsInfo ?? ''),
+        max: feedbackLimits.diagnosticsInfo,
+    });
+    const log = trimOldestLines({
+        text: sanitizeDiagnosticText(request.diagnosticsLog ?? ''),
+        max: feedbackLimits.diagnosticsLog,
+    });
+    if (!info && !log) {
+        return '';
+    }
+    return [
+        '<details><summary>Diagnostic logs</summary>',
+        '',
+        '```text',
+        [info, log].filter(Boolean).join('\n\nlog (oldest first):\n'),
+        '```',
+        '',
+        '</details>',
+    ].join('\n');
+}
+
 function sanitizeOneLine(text: string): string {
     return sanitizeFeedbackText(text).replaceAll(/\s+/g, ' ');
 }
@@ -107,27 +211,51 @@ const kindLabels: Readonly<Record<FeedbackKind, string>> = {
     other: 'Other',
 };
 
-/** Builds the GitHub issue (title, body, labels) from a validated request. */
+/** Issue labels: `base` on every issue, plus the `byKind` entry for the request's kind. */
+export type FeedbackLabels = {
+    base: string[];
+    byKind: Partial<Record<FeedbackKind, string[]>>;
+};
+
+/**
+ * Builds the GitHub issue (title, body, labels) from a validated request. The diagnostics section,
+ * when attached, is appended after the clipped body, so the body cap covers only the message part.
+ */
 export function buildFeedbackIssue({
     request,
     sender,
     submittedAt,
     appName,
+    labels,
 }: Readonly<{
     request: Readonly<FeedbackRequest>;
-    /** Who sent it, by first name. Never an email address. */
-    sender: string;
+    /**
+     * Who sent it, from the app's session (by first name, never an email address). It always wins
+     * over a typed `request.name`. Leave out for apps without sign-in.
+     */
+    sender?: string | undefined;
     submittedAt: string;
     appName: string;
+    /** Default: `['feedback', <kind>]`. */
+    labels?: Readonly<FeedbackLabels> | undefined;
 }>): FeedbackIssue {
     const label = kindLabels[request.kind];
     const message = clip({
         text: sanitizeFeedbackText(request.message),
         max: feedbackLimits.message,
     });
-    const senderText = oneLine({
-        text: sender,
-        max: feedbackLimits.sender,
+    const senderText =
+        oneLine({
+            text: sender,
+            max: feedbackLimits.sender,
+        }) ||
+        oneLine({
+            text: request.name,
+            max: feedbackLimits.name,
+        });
+    const email = oneLine({
+        text: request.email,
+        max: feedbackLimits.email,
     });
     const appText = oneLine({
         text: appName,
@@ -161,6 +289,7 @@ export function buildFeedbackIssue({
         '',
         `- **Kind:** ${label}`,
         `- **From:** ${senderText || 'unknown'}`,
+        ...(email ? [`- **Reply to:** ${email}`] : []),
         `- **Version:** ${version || 'unknown'}`,
         `- **Commit:** ${commit || 'unknown'}`,
         `- **Page:** ${page ? '`' + page.replaceAll('`', "'") + '`' : 'unknown'}`,
@@ -173,17 +302,35 @@ export function buildFeedbackIssue({
 
     return {
         title,
-        body: clip({
-            text: lines.join('\n'),
-            max: feedbackLimits.body,
-        }),
-        labels: ['feedback', request.kind],
+        body: [
+            clip({
+                text: lines.join('\n'),
+                max: feedbackLimits.body,
+            }),
+            buildDiagnosticsSection(request),
+        ]
+            .filter(Boolean)
+            .join('\n\n'),
+        labels: labels
+            ? [...labels.base, ...(labels.byKind[request.kind] ?? [])]
+            : ['feedback', request.kind],
     };
 }
 
 export type FeedbackParseResult = {ok: true; request: FeedbackRequest} | {ok: false; error: string};
 
-const allowedKeys = new Set(['kind', 'message', 'page', 'version', 'commit']);
+const allowedKeys = new Set([
+    'kind',
+    'message',
+    'page',
+    'version',
+    'commit',
+    'name',
+    'email',
+    'website',
+    'diagnosticsInfo',
+    'diagnosticsLog',
+]);
 
 const notFeedback: FeedbackParseResult = {
     ok: false,
@@ -200,14 +347,20 @@ export function parseFeedbackRequest(raw: unknown): FeedbackParseResult {
         return notFeedback;
     }
     const value = raw as Record<string, unknown>;
-    const {kind, message, page, version, commit} = value;
+    const {kind, message, page, version, commit, name, email, website} = value;
+    const {diagnosticsInfo, diagnosticsLog} = value;
     if (
         !Object.keys(value).every((key) => allowedKeys.has(key)) ||
         !feedbackKinds.includes(kind as FeedbackKind) ||
         typeof message !== 'string' ||
         !isOptionalString(page) ||
         !isOptionalString(version) ||
-        !isOptionalString(commit)
+        !isOptionalString(commit) ||
+        !isOptionalString(name) ||
+        !isOptionalString(email) ||
+        !isOptionalString(website) ||
+        !isOptionalString(diagnosticsInfo) ||
+        !isOptionalString(diagnosticsLog)
     ) {
         return notFeedback;
     } else if (!stripHtml(message).trim()) {
@@ -220,6 +373,24 @@ export function parseFeedbackRequest(raw: unknown): FeedbackParseResult {
             ok: false,
             error: `That message is too long (limit ${feedbackLimits.message} characters).`,
         };
+    } else if (name !== undefined && name.length > feedbackLimits.name) {
+        return {
+            ok: false,
+            error: `That name is too long (limit ${feedbackLimits.name} characters).`,
+        };
+    } else if (email && !looksLikeEmail(email)) {
+        return {
+            ok: false,
+            error: 'That email address does not look right.',
+        };
+    } else if (
+        (diagnosticsInfo?.length ?? 0) > feedbackLimits.diagnosticsInfo ||
+        (diagnosticsLog?.length ?? 0) > feedbackLimits.diagnosticsLog
+    ) {
+        return {
+            ok: false,
+            error: 'The diagnostic logs are too long.',
+        };
     } else {
         return {
             ok: true,
@@ -229,6 +400,11 @@ export function parseFeedbackRequest(raw: unknown): FeedbackParseResult {
                 page,
                 version,
                 commit,
+                name,
+                email,
+                website,
+                diagnosticsInfo,
+                diagnosticsLog,
             },
         };
     }

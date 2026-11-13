@@ -46,6 +46,8 @@ const validBody = {
     commit: 'browser-claimed',
 };
 
+const jsonHeaders = {'content-type': 'application/json'};
+
 describe(sendFeedback.name, () => {
     it('files the issue with the server commit and a token header', async () => {
         const {sent, options, logs} = setup();
@@ -70,6 +72,31 @@ describe(sendFeedback.name, () => {
         const issue = JSON.parse(String(first.init.body)) as {body: string};
         assert.isTrue(issue.body.includes('server-commit'));
         assert.isFalse(issue.body.includes('browser-claimed'));
+        assert.isEmpty(logs);
+    });
+
+    it('files an issue without a sender using the typed name, reply-to and custom labels', async () => {
+        const {sent, options} = setup();
+        const {sender: _unused, ...withoutSender} = options;
+        const result = await sendFeedback({
+            ...withoutSender,
+            labels: {base: ['app-feedback'], byKind: {problem: ['bug']}},
+            body: {kind: 'problem', message: 'Broken', name: 'Pat', email: 'pat@example.com'},
+        });
+        assert.strictEquals(result.status, 200);
+        const issue = JSON.parse(String(sent[0]?.init.body)) as {body: string; labels: string[]};
+        assert.deepEquals(issue.labels, ['app-feedback', 'bug']);
+        assert.isTrue(issue.body.includes('- **From:** Pat\n- **Reply to:** pat@example.com'));
+    });
+
+    it('answers 200 for a tripped honeypot without calling GitHub or logging', async () => {
+        const {sent, options, logs} = setup();
+        const result = await sendFeedback({
+            ...options,
+            body: {...validBody, website: 'http://spam.example'},
+        });
+        assert.deepEquals(result, {status: 200, body: {ok: true}});
+        assert.isEmpty(sent);
         assert.isEmpty(logs);
     });
 
@@ -154,6 +181,7 @@ describe(handleFeedbackRequest.name, () => {
         const response = await handleFeedbackRequest(
             new Request('https://app.example/api/feedback', {
                 method: 'POST',
+                headers: jsonHeaders,
                 body: JSON.stringify(validBody),
             }),
             options,
@@ -162,6 +190,70 @@ describe(handleFeedbackRequest.name, () => {
         assert.deepEquals(await response.json(), {
             ok: true,
         });
+    });
+
+    it('rejects a content type that is not JSON with 415', async () => {
+        const {options, sent} = setup();
+        for (const init of [
+            {},
+            {headers: {'content-type': 'text/plain'}, body: JSON.stringify(validBody)},
+        ]) {
+            const response = await handleFeedbackRequest(
+                new Request('https://app.example/api/feedback', {
+                    method: 'POST',
+                    ...init,
+                }),
+                options,
+            );
+            assert.strictEquals(response.status, 415);
+        }
+        assert.isEmpty(sent);
+    });
+
+    it('accepts a JSON content type with a charset', async () => {
+        const {options} = setup();
+        const response = await handleFeedbackRequest(
+            new Request('https://app.example/api/feedback', {
+                method: 'POST',
+                headers: {'content-type': 'Application/JSON; charset=utf-8'},
+                body: JSON.stringify(validBody),
+            }),
+            options,
+        );
+        assert.strictEquals(response.status, 200);
+    });
+
+    it('answers 400 for an oversized body, by declared length or by text', async () => {
+        const {options, sent} = setup();
+        const body = JSON.stringify(validBody);
+        const declared = await handleFeedbackRequest(
+            new Request('https://app.example/api/feedback', {
+                method: 'POST',
+                headers: {...jsonHeaders, 'content-length': String(body.length)},
+                body,
+            }),
+            {...options, maxBodyChars: body.length - 1},
+        );
+        assert.strictEquals(declared.status, 400);
+        const actual = await handleFeedbackRequest(
+            new Request('https://app.example/api/feedback', {
+                method: 'POST',
+                headers: jsonHeaders,
+                body,
+            }),
+            {...options, maxBodyChars: body.length - 1},
+        );
+        assert.strictEquals(actual.status, 400);
+        assert.isEmpty(sent);
+        const defaultLimit = await handleFeedbackRequest(
+            new Request('https://app.example/api/feedback', {
+                method: 'POST',
+                headers: jsonHeaders,
+                body: JSON.stringify({...validBody, message: 'x'.repeat(70_000)}),
+            }),
+            options,
+        );
+        assert.strictEquals(defaultLimit.status, 400);
     });
 
     it('rejects other methods with 405', async () => {
@@ -180,6 +272,7 @@ describe(handleFeedbackRequest.name, () => {
         const response = await handleFeedbackRequest(
             new Request('https://app.example/api/feedback', {
                 method: 'POST',
+                headers: jsonHeaders,
                 body: 'not json',
             }),
             options,

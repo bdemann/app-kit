@@ -53,9 +53,26 @@ html`
     child with `data-drawer-close`. Fires `closeRequested`.
 -   **`AboutPage`**: `appName`, `logoUrl`, `repoUrl`, `buildInfo` (`{version, commit, buildTime}`),
     `fetchLatestCommit()` (resolve the commit that is deployed now, for example from a health
-    endpoint), and `links`.
+    endpoint), `links`, and an optional `reloadTimeoutMs` (default 10,000). Reload asks the new
+    service worker to take over and waits until it is activated (or the timeout passes) before
+    reloading, showing "Reloading..." meanwhile. When the latest-commit check says a newer version is
+    live, "App updates" says "A new version is ready. Reload to use it." too.
 -   **`FeedbackPage`**: `send(draft)` returning `{ok: true}` or `{ok: false, message}`, and an optional
-    `draftStorageKey` to keep unsent drafts.
+    `draftStorageKey` to keep unsent drafts. With none of the inputs below it looks and behaves as in
+    0.1.0, and the draft is exactly `{kind, message}`. All of these are optional:
+    -   `intro: string`: replaces the sentence under the heading.
+    -   `contactFields: boolean`: shows "Name (optional)" and "Email (optional, if you'd like a
+        reply)"; the draft gets trimmed `name` and `email`. An invalid email shows an inline error and
+        does not send. `contactStorageKey: string` remembers both in localStorage.
+    -   `diagnostics: {label?, defaultKinds?, collect}`: a checkbox (default label "Attach diagnostic
+        logs"), checked by default for `defaultKinds` (default `['problem']`) until the person touches
+        it, with a collapsed "What will be sent" preview of what `collect(): {info, log}` returned.
+        When checked, the draft gets `diagnosticsInfo` and `diagnosticsLog` (the log is trimmed to the
+        newest lines that fit `feedbackLimits.diagnosticsLog`).
+    -   `prefill: {kind?, message?, attachDiagnostics?}`: starting values, applied once when the
+        element is created. A prefill message wins over a stored draft.
+    -   `honeypot: boolean`: a visually hidden, `aria-hidden`, untabbable "Website" field whose value
+        goes into the draft as `website`.
 
 ### Theming
 
@@ -99,14 +116,81 @@ return handleFeedbackRequest(request, {
 Netlify Functions v2 use the same call, since they also receive a `Request` and return a `Response`.
 For any other framework, call `sendFeedback({body, ...})` and send back its `{status, body}`.
 
+Options beyond the example above (all optional):
+
+-   `sender`: leave it out for a public app. The issue's "From" line then shows the name the person
+    typed, or "unknown". A `sender` you supply always wins over a typed name.
+-   `labels: {base: string[]; byKind: Partial<Record<FeedbackKind, string[]>>}`: replaces the default
+    labels `['feedback', <kind>]` with `base` plus the entry for the request's kind.
+-   `maxBodyChars`: largest raw body `handleFeedbackRequest` reads (default `feedbackLimits.request`,
+    70,000).
+
+A request with a non-empty `website` (the honeypot) is a bot: it gets 200 `{ok: true}` and GitHub is
+never called. When the request has an `email`, the issue gets a "Reply to" line. Diagnostics are
+appended to the issue in a collapsed section after the message, so the message part keeps its
+5,000 character cap and the whole issue stays under GitHub's limit. Message text, names, emails and
+diagnostics are never logged.
+
+Public app without sign-in (Netlify Function, contact fields, honeypot and diagnostics):
+
+```ts
+// netlify/functions/feedback.mts
+import {handleFeedbackRequest} from '@bdemann/app-kit/server';
+
+export default (request: Request) =>
+    handleFeedbackRequest(request, {
+        token: process.env['GITHUB_FEEDBACK_TOKEN'],
+        repo: 'bdemann/my-app',
+        appName: 'My App',
+        labels: {base: ['app-feedback'], byKind: {idea: ['idea'], problem: ['bug']}},
+        commit: process.env['COMMIT_REF'] ?? 'dev',
+        submittedAt: new Date().toISOString(),
+        fetchFunction: fetch,
+    });
+```
+
+```ts
+html`
+    <${FeedbackPage.assign({
+        send: (draft) => postToFunction(draft),
+        draftStorageKey: 'my-app.feedbackDraft',
+        contactFields: true,
+        contactStorageKey: 'my-app.feedbackContact',
+        honeypot: true,
+        diagnostics: {collect: () => ({info: appInfoLines(), log: recentLogLines()})},
+    })}></${FeedbackPage}>
+`;
+```
+
+`handleFeedbackRequest` answers 405 for anything but POST, 415 for a content type that is not JSON,
+and 400 for a body over `maxBodyChars` or that is not JSON.
+
 The status codes:
 
--   200: the issue was filed.
--   400: the message is invalid.
+-   200: the issue was filed (or the honeypot caught a bot).
+-   400: the message is invalid, or the body is too large.
+-   415: the content type is not JSON.
 -   502: GitHub failed or rejected the request.
 -   503: no token is set.
 
 The token is only ever sent in a header. Failures are logged by status and error name only.
+
+## Changelog
+
+### 0.2.0
+
+-   Feedback, all optional and backward compatible: contact fields (`name`, `email`, "Reply to" line),
+    diagnostics attachment, `prefill`, `honeypot` (`website`), `intro`, a `labels` override, optional
+    `sender`, `maxBodyChars`. New data helpers: `looksLikeEmail`, `trimOldestLines`,
+    `sanitizeDiagnosticText`, `buildDiagnosticsSection`, `isDiagnosticsAttached`,
+    `isHoneypotTripped`; new limits in `feedbackLimits`.
+-   `handleFeedbackRequest` now answers 415 for a content type that is not JSON (a request with no
+    `application/json` content type used to be parsed anyway) and 400 for an oversized body.
+-   `AboutPage`: Reload waits for the new service worker to activate (with a timeout) instead of
+    reloading at once, so it cannot reload into the old cached shell.
+-   `AboutPage`: "App updates" no longer says "Up to date." next to "A newer version is live"
+    (`describeCombinedUpdateStatus`).
+-   `AboutPage`: the commit link keeps its 44px touch target without pushing the value below its label.
 
 ## Releasing
 

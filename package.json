@@ -1,6 +1,6 @@
 {
     "name": "@bdemann/app-kit",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "description": "Shared bottom nav, slide-out drawer, About page and Feedback page for Benjamin's element-vir apps, plus a platform-neutral feedback server handler.",
     "keywords": [
         "element-vir",
