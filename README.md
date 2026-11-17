@@ -178,7 +178,33 @@ The status codes:
 
 The token is only ever sent in a header. Failures are logged by status and error name only.
 
+## Diagnostic log
+
+`createDiagnosticLog` keeps a small capped log in localStorage and plugs it into the feedback page's
+"Attach diagnostic logs" checkbox. Log app events and errors only: never locations, names, emails or
+note text. Error messages are trimmed and URLs keep only the file name.
+
+```ts
+import {createDiagnosticLog, FeedbackPage} from '@bdemann/app-kit/ui';
+
+export const diagnosticLog = createDiagnosticLog({storageKey: 'my-app.diagnosticLog'});
+diagnosticLog.captureErrors(); // logs window errors and unhandled rejections as `js-error`
+diagnosticLog.log('weather-failed', {status: 503}); // anywhere in the app
+// <kit-feedback-page> input:
+//   diagnostics: diagnosticLog.feedbackDiagnostics({info: () => ({app: 'v1 (abc1234)'})})
+```
+
+`options` (limits, `failureEvents`, `throttledEvents`, `anyRepeatThrottledEvents`) tune the caps; the
+defaults keep 300 routine entries for 48 hours and 100 failure entries (`error`, `js-error`,
+`storage-error`) for 7 days. The pure pieces (`appendEntry`, `parseLog`, `buildDiagnosticReport`, ...)
+are exported from `@bdemann/app-kit/data`.
+
 ## Changelog
+
+### 0.3.0
+
+-   Diagnostic log: `createDiagnosticLog` (`@bdemann/app-kit/ui`) and its pure helpers
+    (`@bdemann/app-kit/data`).
 
 ### 0.2.2
 
